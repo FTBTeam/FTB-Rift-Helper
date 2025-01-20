@@ -17,6 +17,9 @@ public class Config {
     public static final ModConfigSpec.ConfigValue<String> RIFT_TEMPLATE = BUILDER
             .comment("Name of the MCA template which is relocated (from <instance>/ftbteambases/<template>/*.mca) into the rift dimension for each team")
             .define("rift_template", "the_rift");
+    public static final ModConfigSpec.BooleanValue REMOVE_RIFT_MCA_ON_BASE_ARCHIVAL = BUILDER
+            .comment("When a team base is archived, should the corresponding rift island MCA's be cleaned up too? Not essential, but helps save on disk space")
+            .define("remove_rift_mca_on_base_archival", true);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 

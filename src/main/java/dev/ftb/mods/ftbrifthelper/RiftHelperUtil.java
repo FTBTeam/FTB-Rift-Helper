@@ -1,9 +1,11 @@
 package dev.ftb.mods.ftbrifthelper;
 
 import dev.ftb.mods.ftblibrary.math.XZ;
+import dev.ftb.mods.ftbrifthelper.mixin.ChunkMapAccess;
 import dev.ftb.mods.ftbteambases.data.bases.BaseInstanceManager;
 import dev.ftb.mods.ftbteambases.util.RegionCoords;
 import dev.ftb.mods.ftbteambases.util.RegionFileRelocator;
+import net.minecraft.Util;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -15,12 +17,10 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 public class RiftHelperUtil {
-    static void copyAndRelocateRegion(String teamName, RegionCoords rc) {
+    static void copyAndRelocateRegions(UUID teamId, RegionCoords rc) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) {
             CommandSourceStack source = server.createCommandSourceStack();
@@ -29,13 +29,16 @@ public class RiftHelperUtil {
                         FTBRiftHelper.RIFT_DIMENSION, XZ.of(rc.x(), rc.z()), true);
                 relocator.start(success -> {
                     if (success) {
-                        FTBRiftHelper.LOGGER.info("relocated rift template for team {} to {} in rift dimension", teamName, rc);
+                        RiftRegionManager mgr = RiftRegionManager.getInstance();
+                        relocator.getRelocationData().values()
+                                .forEach(data -> mgr.addRegion(teamId, data.orig().offsetBy(data.regionOffset())));
+                        FTBRiftHelper.LOGGER.info("relocated rift template for team {} to {} in rift dimension", teamId, rc);
                     } else {
-                        FTBRiftHelper.LOGGER.error("failed to relocate rift template for team {} to {} in rift dimension", teamName, rc);
+                        FTBRiftHelper.LOGGER.error("failed to relocate rift template for team {} to {} in rift dimension", teamId, rc);
                     }
                 });
             } catch (IOException e) {
-                FTBRiftHelper.LOGGER.error("Error relocating rift template for team {} to {}: {}", teamName, rc, e.getMessage());
+                FTBRiftHelper.LOGGER.error("Error relocating rift template for team {} to {}: {}", teamId, rc, e.getMessage());
             }
         }
     }
@@ -81,5 +84,11 @@ public class RiftHelperUtil {
      */
     static RegionCoords riftToBaseCoords(RegionCoords regionCoords) {
         return regionCoords;
+    }
+
+    public static Set<RegionCoords> getLoadedRegions(ServerLevel level) {
+        return Util.make(new HashSet<>(), set -> ((ChunkMapAccess) level.getChunkSource().chunkMap).invokeGetChunks()
+                .forEach(holder -> set.add(new RegionCoords(holder.getPos().x >> 5, holder.getPos().z >> 5)))
+        );
     }
 }

@@ -2,9 +2,10 @@ package dev.ftb.mods.ftbrifthelper;
 
 import com.mojang.logging.LogUtils;
 import dev.ftb.mods.ftbteambases.data.bases.BaseInstanceManager;
+import dev.ftb.mods.ftbteambases.events.BaseArchivedEvent;
 import dev.ftb.mods.ftbteambases.events.BaseCreatedEvent;
 import dev.ftb.mods.ftbteambases.util.RegionCoords;
-import dev.ftb.mods.ftbteambases.util.RegionExtents;
+import dev.ftb.mods.ftbteambases.util.RegionFileUtil;
 import dev.ftb.mods.ftbteams.api.Team;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
@@ -15,7 +16,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -27,7 +27,12 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 @Mod(FTBRiftHelper.MODID)
 public class FTBRiftHelper {
@@ -51,61 +56,87 @@ public class FTBRiftHelper {
 
         // arch events
         BaseCreatedEvent.CREATED.register(this::onTeamBaseCreation);
+        BaseArchivedEvent.ARCHIVED.register(this::onTeamBaseArchived);
     }
 
     private void onTeamBaseCreation(BaseInstanceManager baseInstanceManager, ServerPlayer player, Team team) {
         baseInstanceManager.getBaseForTeam(team).ifPresent(base -> {
             RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
-            RiftHelperUtil.copyAndRelocateRegion(team.getShortName(), riftCoords);
+            RiftHelperUtil.copyAndRelocateRegions(team.getTeamId(), riftCoords);
         });
+    }
+
+    private void onTeamBaseArchived(BaseInstanceManager baseInstanceManager, Team team) {
+        RiftRegionManager.getInstance().onTeamBaseArchived(team.getTeamId());
     }
 
     private void onServerTick(ServerTickEvent.Post event) {
         // once a minute, check if any regions need refreshing
-        if (event.getServer().getTickCount() % 1200 == 0) {
-            Set<RegionCoords> pending = PendingRegionRefresh.getInstance().getPending();
-            if (!pending.isEmpty()) {
-                ServerLevel level = event.getServer().getLevel(RIFT_DIMENSION);
-                if (level != null) {
-                    pending.forEach(rc -> {
-                        if (safeToRefresh(level, rc)) {
-                            RiftHelperUtil.copyAndRelocateRegion("<refresh>", rc);
-                        }
-                    });
-                    pending.clear();
+        if (event.getServer().getTickCount() % 120 == 0) {
+            ServerLevel level = event.getServer().getLevel(RIFT_DIMENSION);
+            if (level != null) {
+                Set<UUID> pendingTeams = RiftRegionManager.getInstance().getPendingRefresh();
+                Set<RegionCoords> pendingDelete = RiftRegionManager.getInstance().getPendingDeletion();
+                if (!pendingDelete.isEmpty() || !pendingTeams.isEmpty()) {
+                    Set<RegionCoords> loadedRegions = RiftHelperUtil.getLoadedRegions(level);
+                    checkForRegionRefresh(level, loadedRegions, pendingTeams);
+                    if (Config.REMOVE_RIFT_MCA_ON_BASE_ARCHIVAL.get()) {
+                        checkForRegionDeletion(level, loadedRegions, pendingDelete);
+                    }
                 }
             }
         }
     }
 
-    private boolean safeToRefresh(ServerLevel riftLevel, RegionCoords rc) {
-        // FIXME: a little kludgy here and dependent on a 2x2 region template
-        // Check that no player is closer than 1024 blocks to the (0,64,0) point of the base region
-        // This is the centre, since we're copying 4 regions ([-1,-1], [-1, 0], [0,-1], [0,0])
-        return riftLevel.players().stream()
-                .noneMatch(p -> p.distanceToSqr(Vec3.atCenterOf(rc.getBlockPos(ZERO_64_ZERO))) < 1024 * 1024);
+    private void checkForRegionRefresh(ServerLevel level, Set<RegionCoords> loadedRegions, Set<UUID> pendingTeams) {
+        if (!pendingTeams.isEmpty()) {
+            pendingTeams.forEach(teamId ->
+                    BaseInstanceManager.get().getBaseForTeamId(teamId).ifPresent(base -> {
+                        RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
+                        if (!loadedRegions.contains(riftCoords)) {
+                            if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, teamId)) {
+                                RiftHelperUtil.copyAndRelocateRegions(teamId, riftCoords);
+                                RiftRegionManager.getInstance().clearPendingRefresh(teamId);
+                            }
+                        }
+                    }));
+        }
+    }
+
+    private void checkForRegionDeletion(ServerLevel level, Set<RegionCoords> loadedRegions, Set<RegionCoords> pendingDelete) {
+        List<String> subDirs = List.of("region", "entities", "poi");
+
+        if (!pendingDelete.isEmpty()) {
+            pendingDelete.forEach(rc -> {
+                if (!loadedRegions.contains(rc)) {
+                    for (String subDir : subDirs) {
+                        if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, pendingDelete)) {
+                            Path path = RegionFileUtil.getPathForDimension(level.getServer(), RIFT_DIMENSION, subDir)
+                                    .resolve(String.format("r.%d.%d.mca", rc.x(), rc.z()));
+                            try {
+                                Files.deleteIfExists(path);
+                                RiftRegionManager.getInstance().clearPendingDeletion(rc);
+                                LOGGER.debug("Purged region file {}", path);
+                            } catch (IOException e) {
+                                LOGGER.error("can't delete {}: {}", path, e.getMessage());
+                            }
+                        }
+                    }
+                }
+            });
+        }
     }
 
     private void onEntityDeath(LivingDeathEvent event) {
-        if (event.getEntity().level().dimension().location().equals(RIFT_DIMENSION)) {
+        if (event.getEntity().level() instanceof ServerLevel sl && sl.dimension().location().equals(RIFT_DIMENSION.location())) {
             ResourceLocation rl = BuiltInRegistries.ENTITY_TYPE.getKey(event.getEntity().getType());
             if (rl.equals(RIFT_WEAVER)) {
                 BlockPos pos = event.getEntity().blockPosition();
-                RegionCoords riftCoords = new RegionCoords(pos.getX() >> 9, pos.getZ() >> 9);
-                if (BaseInstanceManager.get().allLiveBases().values().stream()
-                        .anyMatch(base -> coordsInExtents(RiftHelperUtil.riftToBaseCoords(riftCoords), base.extents()))) {
-                    PendingRegionRefresh.getInstance().markRegionForRefresh(riftCoords);
-                    LOGGER.info("Rift Weaver boss killed at {} - mark region {} for pending refresh", pos, riftCoords);
-                } else {
-                    LOGGER.warn("Rift Weaver boss was killed outside any known rift island coords? Loc = {}", pos);
-                }
+                RegionCoords regionCoords = new RegionCoords(pos.getX() >> 9, pos.getZ() >> 9);
+                RiftRegionManager mgr = RiftRegionManager.getInstance();
+                mgr.getTeamForRegion(regionCoords).ifPresent(mgr::addPendingRefresh);
             }
         }
-    }
-
-    private boolean coordsInExtents(RegionCoords rc, RegionExtents extents) {
-        return rc.x() >= extents.start().x() && rc.x() <= extents.end().x()
-                && rc.z() >= extents.start().z() && rc.z() <= extents.end().z();
     }
 
     private void registerCommands(RegisterCommandsEvent event) {
@@ -113,6 +144,6 @@ public class FTBRiftHelper {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
-        PendingRegionRefresh.clearCachedRiftDimension();
+        RiftRegionManager.clearCachedRiftDimension();
     }
 }
