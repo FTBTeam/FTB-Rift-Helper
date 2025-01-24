@@ -7,6 +7,7 @@ import dev.ftb.mods.ftbteambases.events.BaseCreatedEvent;
 import dev.ftb.mods.ftbteambases.util.RegionCoords;
 import dev.ftb.mods.ftbteambases.util.RegionFileUtil;
 import dev.ftb.mods.ftbteams.api.Team;
+import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -15,7 +16,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -30,6 +34,7 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -44,12 +49,9 @@ public class FTBRiftHelper {
     private static final Vec3i ZERO_64_ZERO = new Vec3i(0, 64, 0);
 
     public FTBRiftHelper(IEventBus modEventBus, ModContainer modContainer) {
-//        modEventBus.addListener(this::commonSetup);
-
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
 
         NeoForge.EVENT_BUS.addListener(this::registerCommands);
-//        NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(this::onEntityDeath);
         NeoForge.EVENT_BUS.addListener(this::onServerTick);
@@ -63,6 +65,7 @@ public class FTBRiftHelper {
         baseInstanceManager.getBaseForTeam(team).ifPresent(base -> {
             RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
             RiftHelperUtil.copyAndRelocateRegions(team.getTeamId(), riftCoords);
+            pasteTempleStructure(player);
         });
     }
 
@@ -107,19 +110,24 @@ public class FTBRiftHelper {
         List<String> subDirs = List.of("region", "entities", "poi");
 
         if (!pendingDelete.isEmpty()) {
+            Set<RegionCoords> toClose = new HashSet<>();
             pendingDelete.forEach(rc -> {
                 if (!loadedRegions.contains(rc)) {
-                    for (String subDir : subDirs) {
-                        if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, pendingDelete)) {
-                            Path path = RegionFileUtil.getPathForDimension(level.getServer(), RIFT_DIMENSION, subDir)
-                                    .resolve(String.format("r.%d.%d.mca", rc.x(), rc.z()));
-                            try {
-                                Files.deleteIfExists(path);
-                                RiftRegionManager.getInstance().clearPendingDeletion(rc);
-                                LOGGER.debug("Purged region file {}", path);
-                            } catch (IOException e) {
-                                LOGGER.error("can't delete {}: {}", path, e.getMessage());
-                            }
+                    toClose.add(rc);
+                }
+            });
+
+            toClose.forEach(rc -> {
+                for (String subDir : subDirs) {
+                    if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, List.of(rc))) {
+                        Path path = RegionFileUtil.getPathForDimension(level.getServer(), RIFT_DIMENSION, subDir)
+                                .resolve(String.format("r.%d.%d.mca", rc.x(), rc.z()));
+                        try {
+                            Files.deleteIfExists(path);
+                            RiftRegionManager.getInstance().clearPendingDeletion(rc);
+                            LOGGER.debug("Purged region file {}", path);
+                        } catch (IOException e) {
+                            LOGGER.error("can't delete {}: {}", path, e.getMessage());
                         }
                     }
                 }
@@ -145,5 +153,16 @@ public class FTBRiftHelper {
 
     private void onServerStopping(ServerStoppingEvent event) {
         RiftRegionManager.clearCachedRiftDimension();
+    }
+
+    private void pasteTempleStructure(ServerPlayer player) {
+        ResourceLocation templeLoc = Config.getTempleStructure();
+        if (templeLoc != null && player.level() instanceof ServerLevel serverLevel) {
+            player.getServer().getStructureManager().get(templeLoc).ifPresent(template -> {
+                BlockPos pos = new BlockPos(player.getBlockX(), Config.TEMPLATE_STRUCTURE_Y.get(), player.getBlockZ());
+                StructurePlaceSettings settings = new StructurePlaceSettings();
+                template.placeInWorld(serverLevel, pos, pos, settings, RandomSource.create(Util.getMillis()), Block.UPDATE_CLIENTS);
+            });
+        }
     }
 }
