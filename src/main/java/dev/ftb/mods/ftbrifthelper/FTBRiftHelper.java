@@ -6,12 +6,15 @@ import dev.ftb.mods.ftbteambases.events.BaseArchivedEvent;
 import dev.ftb.mods.ftbteambases.events.BaseCreatedEvent;
 import dev.ftb.mods.ftbteambases.util.RegionCoords;
 import dev.ftb.mods.ftbteambases.util.RegionFileUtil;
+import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
+import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -20,6 +23,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
+import net.neoforged.bus.api.Event;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -55,6 +59,7 @@ public class FTBRiftHelper {
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(this::onEntityDeath);
         NeoForge.EVENT_BUS.addListener(this::onServerTick);
+        NeoForge.EVENT_BUS.addListener(this::onPlayerDeath);
 
         // arch events
         BaseCreatedEvent.CREATED.register(this::onTeamBaseCreation);
@@ -88,6 +93,23 @@ public class FTBRiftHelper {
                     }
                 }
             }
+        }
+    }
+
+    private void onPlayerDeath(LivingDeathEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player && player.level().dimension().equals(RIFT_DIMENSION)) {
+            // players don't die in the rift dimension, instead they're kicked back to base spawn with 1 health and full inventory
+            FTBTeamsAPI.api().getManager().getTeamForPlayer(player).ifPresent(team -> {
+                BaseInstanceManager mgr = BaseInstanceManager.get(player.getServer());
+                player.setHealth(1f);
+                event.setCanceled(true);
+                if (!mgr.teleportToBaseSpawn(player, team.getId())) {
+                    mgr.teleportToLobby(player);
+                }
+                player.server.executeIfPossible(() ->
+                        player.displayClientMessage(Component.translatable("ftbrifthelper.bootedFromRift").withStyle(ChatFormatting.GOLD), false)
+                );
+            });
         }
     }
 
