@@ -3,7 +3,10 @@ plugins {
     id 'maven-publish'
     id 'net.neoforged.moddev' version '2.0.74'
     id 'idea'
+    id "me.modmuss50.mod-publish-plugin" version "0.7.2"
 }
+
+apply from: 'https://raw.githubusercontent.com/FTBTeam/mods-meta/main/gradle/changelog.gradle'
 
 tasks.named('wrapper', Wrapper).configure {
     // Define wrapper values here so as to not have to always do so when updating gradlew.properties.
@@ -24,18 +27,18 @@ repositories {
     mavenLocal()
 
     maven {
-        url "https://maven.architectury.dev/"
+        url = "https://maven.architectury.dev/"
     }
 
     maven {
-        url "https://maven.ftb.dev/releases"
+        url = "https://maven.ftb.dev/releases"
         content {
             includeGroup "dev.ftb.mods"
         }
     }
 
     maven {
-        url "https://maven.ftb.dev/snapshots"
+        url = "https://maven.ftb.dev/snapshots"
         content {
             includeGroup "dev.ftb.mods"
         }
@@ -193,13 +196,13 @@ publishing {
     publications {
         register('mavenJava', MavenPublication) {
             artifactId = archives_base_name
-            version ftbPublishing.mavenVersion
+            version = ftbPublishing.mavenVersion
             from components.java
         }
     }
     repositories {
         maven {
-            url "file://${project.projectDir}/repo"
+            url = "file://${project.projectDir}/repo"
         }
         if (ftbPublishing.ftbToken) {
             maven {
@@ -219,6 +222,39 @@ publishing {
                 }
             }
         }
+    }
+}
+
+publishMods {
+    dryRun = providers.environmentVariable("CURSEFORGE_KEY").getOrNull() == null
+    changelog = createChangelog(project)
+    version = mod_version
+
+    def tag = providers.environmentVariable("TAG").getOrElse("release")
+    type = tag.endsWith("-beta") ? BETA : (tag.endsWith("-alpha") ? ALPHA : STABLE)
+
+    def createOptions = (String projectName) -> {
+        publishOptions {
+            file = jar.archiveFile
+            displayName = "[${projectName.toUpperCase()}] ${mod_name} ${mod_version}"
+            modLoaders.add(projectName.toLowerCase())
+        }
+    }
+
+    def neoForgeOptions = createOptions("neoforge")
+
+    def curseForgeOptions = curseforgeOptions {
+        accessToken = providers.environmentVariable("CURSEFORGE_KEY")
+        minecraftVersions.add("${minecraft_version}")
+        javaVersions.add(JavaVersion.VERSION_21)
+    }
+
+    curseforge("curseforgeNeoForge") {
+        from(curseForgeOptions, neoForgeOptions)
+        projectId = curseforge_id
+        requires('ftb-library-forge')
+        requires('ftb-teams-forge')
+        requires('ftb-team-bases')
     }
 }
 
