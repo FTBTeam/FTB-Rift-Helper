@@ -23,7 +23,6 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
-import net.neoforged.bus.api.Event;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -79,15 +78,15 @@ public class FTBRiftHelper {
     }
 
     private void onServerTick(ServerTickEvent.Post event) {
-        // once a minute, check if any regions need refreshing
-        if (event.getServer().getTickCount() % 120 == 0) {
+        // once a minute by default, check if any regions need refreshing
+        if (event.getServer().getTickCount() % Config.REFRESH_CHECK_INTERVAL.get() == 0) {
             ServerLevel level = event.getServer().getLevel(RIFT_DIMENSION);
             if (level != null) {
-                Set<UUID> pendingTeams = RiftRegionManager.getInstance().getPendingRefresh();
+                Set<UUID> pendingRefresh = RiftRegionManager.getInstance().getPendingRefresh();
                 Set<RegionCoords> pendingDelete = RiftRegionManager.getInstance().getPendingDeletion();
-                if (!pendingDelete.isEmpty() || !pendingTeams.isEmpty()) {
+                if (!pendingDelete.isEmpty() || !pendingRefresh.isEmpty()) {
                     Set<RegionCoords> loadedRegions = RiftHelperUtil.getLoadedRegions(level);
-                    checkForRegionRefresh(level, loadedRegions, pendingTeams);
+                    checkForRegionRefresh(level, loadedRegions, pendingRefresh);
                     if (Config.REMOVE_RIFT_MCA_ON_BASE_ARCHIVAL.get()) {
                         checkForRegionDeletion(level, loadedRegions, pendingDelete);
                     }
@@ -114,46 +113,40 @@ public class FTBRiftHelper {
     }
 
     private void checkForRegionRefresh(ServerLevel level, Set<RegionCoords> loadedRegions, Set<UUID> pendingTeams) {
-        if (!pendingTeams.isEmpty()) {
-            pendingTeams.forEach(teamId ->
-                    BaseInstanceManager.get().getBaseForTeamId(teamId).ifPresent(base -> {
-                        RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
-                        if (!loadedRegions.contains(riftCoords)) {
-                            if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, teamId)) {
-                                RiftHelperUtil.copyAndRelocateRegions(teamId, riftCoords);
-                                RiftRegionManager.getInstance().clearPendingRefresh(teamId);
-                            }
-                        }
-                    }));
-        }
+        pendingTeams.forEach(teamId ->
+                BaseInstanceManager.get().getBaseForTeamId(teamId).ifPresent(base -> {
+                    RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
+                    if (!loadedRegions.contains(riftCoords) && RiftRegionManager.getInstance().tryCloseRegionFiles(level, teamId)) {
+                        RiftHelperUtil.copyAndRelocateRegions(teamId, riftCoords);
+                    }
+                })
+        );
     }
 
-    private void checkForRegionDeletion(ServerLevel level, Set<RegionCoords> loadedRegions, Set<RegionCoords> pendingDelete) {
-        List<String> subDirs = List.of("region", "entities", "poi");
+    private static final List<String> SUBDIRS = List.of("region", "entities", "poi");
 
+    private void checkForRegionDeletion(ServerLevel level, Set<RegionCoords> loadedRegions, Set<RegionCoords> pendingDelete) {
         if (!pendingDelete.isEmpty()) {
-            Set<RegionCoords> toClose = new HashSet<>();
+            Set<RegionCoords> toClear = new HashSet<>();
+
             pendingDelete.forEach(rc -> {
                 if (!loadedRegions.contains(rc)) {
-                    toClose.add(rc);
-                }
-            });
-
-            toClose.forEach(rc -> {
-                for (String subDir : subDirs) {
-                    if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, List.of(rc))) {
-                        Path path = RegionFileUtil.getPathForDimension(level.getServer(), RIFT_DIMENSION, subDir)
-                                .resolve(String.format("r.%d.%d.mca", rc.x(), rc.z()));
-                        try {
-                            Files.deleteIfExists(path);
-                            RiftRegionManager.getInstance().clearPendingDeletion(rc);
-                            LOGGER.debug("Purged region file {}", path);
-                        } catch (IOException e) {
-                            LOGGER.error("can't delete {}: {}", path, e.getMessage());
+                    for (String subDir : SUBDIRS) {
+                        if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, List.of(rc))) {
+                            Path path = RegionFileUtil.getPathForDimension(level.getServer(), RIFT_DIMENSION, subDir)
+                                    .resolve(String.format("r.%d.%d.mca", rc.x(), rc.z()));
+                            try {
+                                Files.deleteIfExists(path);
+                                toClear.add(rc);
+                                LOGGER.debug("Purged region file {}", path);
+                            } catch (IOException e) {
+                                LOGGER.error("can't delete {}: {}", path, e.getMessage());
+                            }
                         }
                     }
                 }
             });
+            RiftRegionManager.getInstance().clearPendingDeletion(toClear);
         }
     }
 

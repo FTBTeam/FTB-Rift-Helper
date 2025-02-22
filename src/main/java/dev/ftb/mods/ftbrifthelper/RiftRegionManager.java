@@ -119,12 +119,14 @@ public class RiftRegionManager extends SavedData {
     }
 
     public Set<UUID> getPendingRefresh() {
-        return Collections.unmodifiableSet(pendingRefresh);
+        // return a copy here so we can safely delete elements in clearPendingRefresh()
+        return Set.copyOf(pendingRefresh);
     }
 
     public void clearPendingRefresh(UUID teamId) {
-        pendingRefresh.remove(teamId);
-        setDirty();
+        if (pendingRefresh.remove(teamId)) {
+            setDirty();
+        }
     }
 
     public void onTeamBaseArchived(UUID teamId) {
@@ -146,9 +148,11 @@ public class RiftRegionManager extends SavedData {
         return Collections.unmodifiableSet(pendingDelete);
     }
 
-    public void clearPendingDeletion(RegionCoords rc) {
-        pendingDelete.remove(rc);
-        setDirty();
+    public void clearPendingDeletion(Set<RegionCoords> rc) {
+        if (!rc.isEmpty()) {
+            pendingDelete.removeAll(rc);
+            setDirty();
+        }
     }
 
     public boolean tryCloseRegionFiles(ServerLevel level, UUID teamId) {
