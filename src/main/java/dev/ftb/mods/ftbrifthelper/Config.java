@@ -28,6 +28,9 @@ public class Config {
     public static final ModConfigSpec.IntValue TEMPLATE_STRUCTURE_Y = BUILDER
             .comment("Y position to paste the overworld temple structure at")
             .defineInRange("temple_structure_y", -55, Integer.MIN_VALUE, Integer.MAX_VALUE);
+    public static final ModConfigSpec.IntValue REFRESH_CHECK_INTERVAL = BUILDER
+            .comment("Interval in ticks to check for region refreshing; default 1200 = 1 minute")
+            .defineInRange("region_refresh_interval", 1200, 100, Integer.MAX_VALUE);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 

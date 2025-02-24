@@ -30,6 +30,7 @@ public class RiftHelperUtil {
                 relocator.start(success -> {
                     if (success) {
                         RiftRegionManager mgr = RiftRegionManager.getInstance();
+                        mgr.clearPendingRefresh(teamId);
                         relocator.getRelocationData().values()
                                 .forEach(data -> mgr.addRegion(teamId, data.orig().offsetBy(data.regionOffset())));
                         FTBRiftHelper.LOGGER.info("relocated rift template for team {} to {} in rift dimension", teamId, rc);
