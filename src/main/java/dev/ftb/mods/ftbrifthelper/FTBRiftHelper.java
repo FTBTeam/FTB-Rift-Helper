@@ -131,8 +131,8 @@ public class FTBRiftHelper {
 
             pendingDelete.forEach(rc -> {
                 if (!loadedRegions.contains(rc)) {
-                    for (String subDir : SUBDIRS) {
-                        if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, List.of(rc))) {
+                    if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, List.of(rc))) {
+                        for (String subDir : SUBDIRS) {
                             Path path = RegionFileUtil.getPathForDimension(level.getServer(), RIFT_DIMENSION, subDir)
                                     .resolve(String.format("r.%d.%d.mca", rc.x(), rc.z()));
                             try {
