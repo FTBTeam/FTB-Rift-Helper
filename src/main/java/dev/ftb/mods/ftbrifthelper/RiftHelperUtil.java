@@ -20,11 +20,20 @@ import java.io.IOException;
 import java.util.*;
 
 public class RiftHelperUtil {
-    static void copyAndRelocateRegions(UUID teamId, RegionCoords rc) {
+    // all access to this is via main thread
+    private static final Set<UUID> inProgress = new HashSet<>();
+
+    static void copyAndRelocateRegions(final UUID teamId, RegionCoords rc) {
+        if (inProgress.contains(teamId)) {
+            FTBRiftHelper.LOGGER.warn("rift region relocation already in progress for team {}, not starting a new one", teamId);
+            return;
+        }
+
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) {
             CommandSourceStack source = server.createCommandSourceStack();
             try {
+                inProgress.add(teamId);
                 RegionFileRelocator relocator = new RegionFileRelocator(source, Config.RIFT_TEMPLATE.get(),
                         FTBRiftHelper.RIFT_DIMENSION, XZ.of(rc.x(), rc.z()), true);
                 relocator.start(success -> {
@@ -37,6 +46,7 @@ public class RiftHelperUtil {
                     } else {
                         FTBRiftHelper.LOGGER.error("failed to relocate rift template for team {} to {} in rift dimension", teamId, rc);
                     }
+                    inProgress.remove(teamId);
                 });
             } catch (IOException e) {
                 FTBRiftHelper.LOGGER.error("Error relocating rift template for team {} to {}: {}", teamId, rc, e.getMessage());
