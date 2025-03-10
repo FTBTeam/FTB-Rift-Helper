@@ -162,6 +162,12 @@ public class RiftRegionManager extends SavedData {
     public boolean tryCloseRegionFiles(ServerLevel level, Collection<RegionCoords> regions) {
         IOWorker worker = ((ChunkStorageAccess) level.getChunkSource().chunkMap).getWorker();
         RegionFileStorage storage = ((IOWorkerAccess) worker).getStorage();
+        if (storage == null) {
+            // should never happen! but see https://github.com/FTBTeam/FTB-Modpack-Issues/issues/7259
+            // we'll assume in this case the region is indeed closed and return true
+            FTBRiftHelper.LOGGER.warn("null RegionFileStorage in IOWorker? hopefully closed already, skipping");
+            return true;
+        }
         Long2ObjectLinkedOpenHashMap<RegionFile> cache = ((RegionFileStorageAccess) (Object) storage).getRegionCache();
 
         int closed = 0;
