@@ -115,6 +115,7 @@ public class FTBRiftHelper {
     private void checkForRegionRefresh(ServerLevel level, Set<RegionCoords> loadedRegions, Set<UUID> pendingTeams) {
         pendingTeams.forEach(teamId ->
                 BaseInstanceManager.get().getBaseForTeamId(teamId).ifPresent(base -> {
+                    FTBRiftHelper.LOGGER.debug("About to attempt rift refresh for team {}", teamId);
                     RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
                     if (loadedRegions.contains(riftCoords)) {
                         FTBRiftHelper.LOGGER.info("Skipping rift refresh for team {} - one or more chunks still loaded", teamId);
