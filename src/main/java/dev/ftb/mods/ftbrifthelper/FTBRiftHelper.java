@@ -116,7 +116,9 @@ public class FTBRiftHelper {
         pendingTeams.forEach(teamId ->
                 BaseInstanceManager.get().getBaseForTeamId(teamId).ifPresent(base -> {
                     RegionCoords riftCoords = RiftHelperUtil.baseToRiftCoords(base.extents().start());
-                    if (!loadedRegions.contains(riftCoords) && RiftRegionManager.getInstance().tryCloseRegionFiles(level, teamId)) {
+                    if (loadedRegions.contains(riftCoords)) {
+                        FTBRiftHelper.LOGGER.info("Skipping rift refresh for team {} - one or more chunks still loaded", teamId);
+                    } else if (RiftRegionManager.getInstance().tryCloseRegionFiles(level, teamId)) {
                         RiftHelperUtil.copyAndRelocateRegions(teamId, riftCoords);
                     }
                 })
