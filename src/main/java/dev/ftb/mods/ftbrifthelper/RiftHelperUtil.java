@@ -54,7 +54,7 @@ public class RiftHelperUtil {
         }
     }
 
-    static void sendPlayerToRift(ServerPlayer player, int playerRadius) {
+    public static void sendPlayerToRift(ServerPlayer player, int playerRadius) {
         ServerLevel riftDimension = player.getServer().getLevel(FTBRiftHelper.RIFT_DIMENSION);
 
         if (riftDimension != null) {
